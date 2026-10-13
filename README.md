@@ -1,6 +1,6 @@
 # macsync
 
-MacSync is a menu-bar app for macOS that keeps dated snapshots of folders using
+MacSync is a menu-bar app for macOS, built with SwiftUI, that keeps dated snapshots of folders using
 [rsync](https://rsync.samba.org/) from Homebrew. Each run creates a complete,
 browsable copy of the source folder; files that did not change are hard-linked
 to the previous snapshot, so a snapshot only costs the space of what changed
@@ -28,7 +28,7 @@ to the previous snapshot, so a snapshot only costs the space of what changed
 - macOS 13 or newer.
 - Homebrew rsync 3.1 or newer: `brew install rsync`. Apple's `/usr/bin/rsync` (openrsync) is not used.
 - A destination formatted as APFS or Mac OS Extended. exFAT and FAT have no hard links and are refused.
-- Rust (stable) to build.
+- Swift 5.9 or newer (Xcode 15 or newer) to build.
 
 ## Build and install
 
@@ -72,7 +72,8 @@ SIGN_IDENTITY="Apple Development: you@example.com (TEAMID)" scripts/bundle.sh --
    ```
 
    `-aHAX` keeps permissions, times, symlinks, hard links, ACLs and extended attributes.
-4. On success (exit 0, or 24 when files vanished mid-copy) renames the folder to its stamp, points `latest` at it, applies retention, then locks the new snapshot's folders if read-only is on. On failure `latest` is not touched.
+4. While rsync is still walking the tree (`ir-chk` in its progress line) the percentage is not the size of the whole job, so the bar stays indeterminate and shows how many files have been found. Once the file list is complete (`to-chk`) the bar fills across its full width from the real byte total.
+5. On success (exit 0, or 24 when files vanished mid-copy) renames the folder to its stamp, points `latest` at it, applies retention, then locks the new snapshot's folders if read-only is on. On failure `latest` is not touched.
 
 Only one rsync runs at a time; other jobs wait in a queue.
 
@@ -185,8 +186,6 @@ keep_yearly = "forever"   # or a number of years
 ## Development
 
 ```sh
-cargo test                       # unit tests and headless UI tests
-cargo test -- --ignored          # end-to-end snapshot test, needs Homebrew rsync
-MACSYNC_UI_SHOTS=/tmp/shots cargo test ui_flows   # also write PNG renders of the UI
-MACSYNC_HOME=/tmp/macsync-dev cargo run           # separate config, state and logs
+swift test                                    # unit tests, including an rsync snapshot test when Homebrew rsync is installed
+MACSYNC_HOME=/tmp/macsync-dev swift run       # separate config, state and logs
 ```

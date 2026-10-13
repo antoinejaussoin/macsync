@@ -9,15 +9,16 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
-VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
-TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
-APP="$ROOT/dist/MacSync.app"
+VERSION="$(sed -n 's/.*static let version = "\(.*\)".*/\1/p' Sources/MacSync/MacSyncApp.swift | head -1)"
+export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-13.0}"
 
-cargo build --release
+swift build -c release --product MacSync
+BIN="$(swift build -c release --show-bin-path)/MacSync"
+APP="$ROOT/dist/MacSync.app"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$TARGET_DIR/release/macsync" "$APP/Contents/MacOS/MacSync"
+cp "$BIN" "$APP/Contents/MacOS/MacSync"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

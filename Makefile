@@ -2,7 +2,7 @@ HOST ?= mini
 REMOTE_DIR ?= /Users/antoine/macsync
 APP := dist/MacSync.app
 
-.PHONY: deploy bundle install test lint
+.PHONY: deploy bundle install run test lint
 
 deploy: bundle
 	ssh $(HOST) 'mkdir -p "$(REMOTE_DIR)"'
@@ -15,9 +15,13 @@ bundle:
 install:
 	scripts/bundle.sh --install
 
+run: bundle
+	-pkill -x MacSync
+	@sleep 0.4
+	open "$(APP)"
+
 test:
-	cargo test
+	swift test
 
 lint:
-	cargo fmt --check
-	cargo clippy --all-targets
+	swift build --build-tests
