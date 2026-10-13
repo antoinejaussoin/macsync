@@ -26,6 +26,21 @@ final class MacSyncLogicTests: XCTestCase {
         XCTAssertTrue(parseRsyncVersion("").errorMessage.contains("not GNU"))
     }
 
+    func testBundledRsyncIsPreferred() {
+        XCTAssertEqual(
+            rsyncSearchPaths(overridePath: "/custom/rsync", bundledPath: "/app/rsync"),
+            ["/custom/rsync"]
+        )
+        XCTAssertEqual(
+            rsyncSearchPaths(overridePath: nil, bundledPath: "/app/rsync"),
+            ["/app/rsync", "/opt/homebrew/bin/rsync", "/usr/local/bin/rsync"]
+        )
+        XCTAssertEqual(
+            rsyncSearchPaths(overridePath: nil, bundledPath: nil),
+            ["/opt/homebrew/bin/rsync", "/usr/local/bin/rsync"]
+        )
+    }
+
     func testSystemRsyncIsRejected() {
         let status = locateRsync(overridePath: "/usr/bin/rsync")
         XCTAssertTrue(status.message?.contains("openrsync") == true, status.message ?? "")
@@ -525,7 +540,7 @@ final class MacSyncLogicTests: XCTestCase {
 
     func testEndToEndSnapshotsShareUnchangedFiles() throws {
         guard case .found(let info) = locateRsync(overridePath: nil) else {
-            throw XCTSkip("Homebrew rsync is not installed")
+            throw XCTSkip("rsync 3.1 or newer was not found")
         }
         let root = temporaryDirectory()
         setenv("MACSYNC_HOME", root.path, 1)

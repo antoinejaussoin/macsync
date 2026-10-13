@@ -24,13 +24,24 @@ enum RsyncStatus: Equatable {
     }
 }
 
+/// The copy shipped in `MacSync.app/Contents/MacOS`, when this process is that app.
+func bundledRsyncPath() -> String? {
+    let executable = Bundle.main.executableURL?.path ?? CommandLine.arguments.first
+    guard let executable, !executable.isEmpty else { return nil }
+    let path = URL(fileURLWithPath: executable).deletingLastPathComponent().appendingPathComponent("rsync").path
+    return FileManager.default.isExecutableFile(atPath: path) ? path : nil
+}
+
+func rsyncSearchPaths(overridePath: String?, bundledPath: String?) -> [String] {
+    if let overridePath, !overridePath.isEmpty { return [overridePath] }
+    var paths: [String] = []
+    if let bundledPath, !bundledPath.isEmpty { paths.append(bundledPath) }
+    paths.append(contentsOf: homebrewRsyncCandidates)
+    return paths
+}
+
 func locateRsync(overridePath: String?) -> RsyncStatus {
-    let candidates: [String]
-    if let overridePath, !overridePath.isEmpty {
-        candidates = [overridePath]
-    } else {
-        candidates = homebrewRsyncCandidates
-    }
+    let candidates = rsyncSearchPaths(overridePath: overridePath, bundledPath: bundledRsyncPath())
     var problems: [String] = []
     for path in candidates {
         if path == systemRsync {
@@ -60,10 +71,11 @@ func locateRsync(overridePath: String?) -> RsyncStatus {
             problems.append("\(path): \(error.message)")
         }
     }
+    let hint = "MacSync.app includes rsync. An unpackaged build can use Homebrew instead: brew install rsync"
     if problems.isEmpty {
-        return .missing("Homebrew rsync not found. Install it with: brew install rsync")
+        return .missing("rsync was not found. \(hint)")
     }
-    return .missing("\(problems.joined(separator: "; ")). Install Homebrew rsync with: brew install rsync")
+    return .missing("\(problems.joined(separator: "; ")). \(hint)")
 }
 
 func parseRsyncVersion(_ output: String) -> Result<String, AppError> {

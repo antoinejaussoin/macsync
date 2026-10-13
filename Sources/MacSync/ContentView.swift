@@ -97,12 +97,12 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
             case .missing:
-                Text("rsync not found: brew install rsync")
+                Text("rsync was not found. The app includes its own copy.")
                     .font(.caption)
                     .foregroundStyle(.red)
             }
             DisclosureGroup("rsync location") {
-                TextField("/opt/homebrew/bin/rsync", text: $model.rsyncOverride)
+                TextField("Leave empty for the included rsync", text: $model.rsyncOverride)
                     .textFieldStyle(.roundedBorder)
                 Button("Apply") { model.applyRsyncOverride() }
             }
@@ -180,12 +180,13 @@ struct WelcomeView: View {
                 Text("MacSync copies each source folder into a new dated snapshot on a schedule. Unchanged files are hard-linked to the previous snapshot, so every snapshot is a complete, browsable copy that only costs the space of what changed.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                step("1. Homebrew rsync") {
+                step("1. rsync") {
                     switch model.rsync {
                     case .found(let info):
                         Text("Found rsync \(info.version) at \(info.path)").foregroundStyle(.green)
                     case .missing:
-                        Text("Not found. In Terminal run:  brew install rsync").foregroundStyle(.red)
+                        Text("Not found. MacSync.app includes rsync. This unpackaged build needs Homebrew: brew install rsync")
+                            .foregroundStyle(.red)
                     }
                 }
                 step("2. Full Disk Access") {

@@ -15,10 +15,16 @@ export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-13.0}"
 swift build -c release --product MacSync
 BIN="$(swift build -c release --show-bin-path)/MacSync"
 APP="$ROOT/dist/MacSync.app"
+RSYNC_PREFIX="$ROOT/.build/vendor/rsync-3.5.1"
+
+"$ROOT/scripts/build-rsync.sh"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/MacSync"
+cp "$RSYNC_PREFIX/bin/rsync" "$APP/Contents/MacOS/rsync"
+chmod +x "$APP/Contents/MacOS/rsync"
+cp "$RSYNC_PREFIX/COPYING" "$APP/Contents/Resources/rsync-COPYING"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -49,6 +55,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
+# Sign the nested binary first, then the bundle, so both share one identity.
+codesign --force --sign "${SIGN_IDENTITY:--}" "$APP/Contents/MacOS/rsync"
 codesign --force --sign "${SIGN_IDENTITY:--}" "$APP"
 echo "Built $APP (version $VERSION)"
 

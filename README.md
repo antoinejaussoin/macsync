@@ -26,9 +26,8 @@ to the previous snapshot, so a snapshot only costs the space of what changed
 ## Requirements
 
 - macOS 13 or newer.
-- Homebrew rsync 3.1 or newer: `brew install rsync`. Apple's `/usr/bin/rsync` (openrsync) is not used.
 - A destination formatted as APFS or Mac OS Extended. exFAT and FAT have no hard links and are refused.
-- Swift 5.9 or newer (Xcode 15 or newer) to build.
+- Swift 5.9 or newer (Xcode 15 or newer) to build. The bundle script downloads and compiles rsync 3.5.1, linked only to macOS system libraries, and puts it in the app. Apple's `/usr/bin/rsync` (openrsync) is not used. `swift test` and `swift run` still use Homebrew rsync when you have not built the app.
 
 ## Build and install
 
