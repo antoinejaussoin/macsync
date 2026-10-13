@@ -1,4 +1,21 @@
+# Swift Package Manager
 .build/
 .swiftpm/
-dist/
+
+# Xcode
+DerivedData/
 *.xcuserstate
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+*.hmap
+*.dSYM
+*.dSYM.zip
+
+# App bundle
+dist/
+
+# Rust build output from the previous version
+target/
+
+# macOS
+.DS_Store
