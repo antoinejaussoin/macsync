@@ -44,7 +44,7 @@ struct DetailView: View {
 
     private var editor: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 16) {
                 header
                 actions
                 statusSection
@@ -60,27 +60,32 @@ struct DetailView: View {
                 protectionSection
                 if !model.draftIsNew { deleteSection }
             }
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(24)
+            .frame(maxWidth: 860)
+            .frame(maxWidth: .infinity)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { saveBar }
     }
 
     private var header: some View {
-        HStack(alignment: .center) {
+        HStack(alignment: .center, spacing: 16) {
             TextField("Name", text: model.draftBinding(\.name, fallback: ""))
                 .textFieldStyle(.plain)
-                .font(.title2.bold())
-            Spacer()
+                .font(.largeTitle.weight(.semibold))
+            Spacer(minLength: 12)
             Toggle("Run on schedule", isOn: model.draftBinding(\.enabled, fallback: true))
                 .toggleStyle(.switch)
+                .fixedSize()
         }
     }
 
     @ViewBuilder private var actions: some View {
         if model.draftIsNew {
-            Text("Choose the folders below, then save to start backing up.")
+            Label("Choose the folders below, then save to start backing up.", systemImage: "arrow.down")
                 .foregroundStyle(.secondary)
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .macCard()
         } else if let running = model.running, running.job.pairID == draft.id {
             VStack(alignment: .leading, spacing: 6) {
                 if running.job.kind == .backup, let progress = running.progress {
@@ -108,31 +113,44 @@ struct DetailView: View {
                         Text("\(running.job.kind.verb) since \(SelfDate.time.string(from: running.started))")
                     }
                 }
-                Button("Stop") { model.stop(draft.id) }
+                Button("Stop", role: .destructive) { model.stop(draft.id) }
+                    .buttonStyle(.bordered)
             }
+            .padding(14)
+            .macCard()
         } else {
             let rsyncOK = model.rsync.info != nil
             let record = model.state.pairs[draft.id]
             let hasSnapshot = record?.lastSuccess != nil || latestSnapshotName(dest: URL(fileURLWithPath: draft.destination)) != nil
-            HStack {
+            HStack(spacing: 8) {
                 let backupQueued = model.queue.contains { $0.pairID == draft.id && $0.kind == .backup }
-                Button(backupQueued ? "Queued…" : "Back up now") { model.enqueue(draft.id, .backup) }
-                    .disabled(!rsyncOK || dirty || backupQueued)
+                Button { model.enqueue(draft.id, .backup) } label: {
+                    Label(backupQueued ? "Queued…" : "Back up now", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!rsyncOK || dirty || backupQueued)
                 let checkQueued = model.queue.contains { $0.pairID == draft.id && $0.kind == .integrity }
-                Button(checkQueued ? "Queued…" : "Check integrity") { model.enqueue(draft.id, .integrity) }
-                    .disabled(!rsyncOK || dirty || checkQueued || !hasSnapshot)
-                    .help("Compares every file in the source with the latest snapshot by checksum. Nothing is written.")
-                Button("Show snapshots") { showSnapshots() }
+                Button { model.enqueue(draft.id, .integrity) } label: {
+                    Label(checkQueued ? "Queued…" : "Check integrity", systemImage: "checkmark.shield")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!rsyncOK || dirty || checkQueued || !hasSnapshot)
+                .help("Compares every file in the source with the latest snapshot by checksum. Nothing is written.")
+                Button { showSnapshots() } label: {
+                    Label("Show snapshots", systemImage: "folder")
+                }
+                .buttonStyle(.bordered)
                     .disabled(!directoryExists(draft.destination))
                 if dirty {
                     Text("Save changes to run").font(.caption).foregroundStyle(.secondary)
                 }
+                Spacer(minLength: 0)
             }
         }
     }
 
     private var statusSection: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 8) {
             statusRow("Last backup") {
                 if let backup = model.state.pairs[draft.id]?.lastBackup {
                     Text(relativeTime(backup.finished, now: model.now) + " (\(SelfDate.weekday.string(from: backup.finished)))")
@@ -154,10 +172,12 @@ struct DetailView: View {
                 statusRow("Next check") { Text(nextText(.integrity)) }
             }
         }
+        .padding(14)
+        .macCard()
     }
 
     private var foldersSection: some View {
-        section("Folders") {
+        section("Folders", icon: "folder") {
             folderRow("Source", path: draft.source, placeholder: "Folder to protect") { model.chooseSource() }
             folderRow("Destination", path: draft.destination, placeholder: "Where snapshots are stored") { model.chooseDestination() }
             folderWarnings
@@ -190,26 +210,24 @@ struct DetailView: View {
     }
 
     private var sizesSection: some View {
-        section("Sizes") {
+        section("Sizes", icon: "internaldrive") {
             let stats = model.state.pairs[draft.id]?.stats ?? .empty
             let measuring = model.statsBusy.contains(draft.id)
-            LabeledContent("Source", value: bytes(stats.sourceBytes))
-            LabeledContent("All snapshots on disk") {
-                Text("\(bytes(stats.destinationBytes))  (unchanged files stored once)")
-            }
-            LabeledContent("Snapshots") {
+            let snapshotDetail: String = {
                 if let oldest = stats.oldest, let newest = stats.newest {
-                    Text("\(stats.snapshotCount) · \(friendlyStamp(oldest)) to \(friendlyStamp(newest))")
-                } else {
-                    Text("\(stats.snapshotCount)")
+                    return "\(friendlyStamp(oldest)) – \(friendlyStamp(newest))"
                 }
-            }
-            LabeledContent("Free on destination") {
-                if let free = stats.freeBytes, let fs = stats.filesystem {
-                    Text("\(formatBytes(free)) (\(fs))")
-                } else {
-                    Text(bytes(stats.freeBytes))
-                }
+                return stats.snapshotCount == 0 ? "None yet" : "On disk"
+            }()
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                MetricTile(title: "Source", value: bytes(stats.sourceBytes), detail: "Live folder")
+                MetricTile(title: "Snapshots", value: bytes(stats.destinationBytes), detail: "Unchanged files stored once")
+                MetricTile(title: "Count", value: "\(stats.snapshotCount)", detail: snapshotDetail)
+                MetricTile(
+                    title: "Free space",
+                    value: stats.freeBytes.map(formatBytes) ?? "—",
+                    detail: stats.filesystem.map { $0.uppercased() } ?? "Destination drive"
+                )
             }
             HStack {
                 if measuring {
@@ -234,7 +252,7 @@ struct DetailView: View {
     }
 
     private var scheduleSection: some View {
-        section("Schedule") {
+        section("Schedule", icon: "calendar") {
             scheduleRow("Back up", which: "backup", binding: model.draftBinding(\.backupSchedule, fallback: ""))
             scheduleRow("Check integrity", which: "integrity", binding: model.draftBinding(\.integritySchedule, fallback: ""))
             Text("If the Mac is asleep or the drive is unplugged at the scheduled time, the job runs once when it can.")
@@ -245,7 +263,7 @@ struct DetailView: View {
     }
 
     private var retentionSection: some View {
-        section("Retention") {
+        section("Retention", icon: "clock.arrow.circlepath") {
             retentionRow("Keep the last", value: model.draftBinding(\.retention.keepLast, fallback: 30), range: 0 ... 10_000, unit: "snapshots")
             retentionRow("One per day for", value: model.draftBinding(\.retention.keepDaily, fallback: 0), range: 0 ... 3650, unit: "days")
             retentionRow("One per week for", value: model.draftBinding(\.retention.keepWeekly, fallback: 0), range: 0 ... 520, unit: "weeks")
@@ -279,7 +297,7 @@ struct DetailView: View {
     }
 
     private var optionsSection: some View {
-        section("Options") {
+        section("Options", icon: "slider.horizontal.3") {
             Toggle("Make snapshots read-only", isOn: model.draftBinding(\.readOnly, fallback: true))
                 .help("Files are copied without write permission and snapshot folders are locked after each backup. Restored files come back read-only. Changing this setting makes the next backup copy every file once.")
             Text("Exclude (one rsync pattern per line)")
@@ -288,7 +306,7 @@ struct DetailView: View {
     }
 
     private func integritySection(_ record: IntegrityRecord) -> some View {
-        section("Last integrity check") {
+        section("Last integrity check", icon: "checkmark.shield") {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 if let finished = record.finished {
                     Text("\(relativeTime(finished, now: model.now)):")
@@ -308,14 +326,15 @@ struct DetailView: View {
     }
 
     private var logSection: some View {
-        section("Log") {
+        section("Log", icon: "text.alignleft") {
             LogView(pairID: draft.id, running: model.running?.job.pairID == draft.id)
         }
     }
 
     private var protectionSection: some View {
-        section("What this protects against") {
+        section("What this protects against", icon: "lock.shield") {
             Text("Each snapshot is a separate dated folder, so files that ransomware encrypts or deletes in the source can be restored from an earlier snapshot. Hard links mean snapshots share the same disk blocks for unchanged files: this is not a second copy of the data. Read-only snapshots stop casual rewrites, but anything running as you can undo that. Keep the destination on a separate drive and disconnect it (or use a second, offline drive) for real isolation.")
+                .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -329,8 +348,7 @@ struct DetailView: View {
                 Button("Cancel") { model.confirmDelete = false }
             }
         } else {
-            Button("Remove folder pair…") { model.confirmDelete = true }
-                .foregroundStyle(.red)
+            Button("Remove folder pair…", role: .destructive) { model.confirmDelete = true }
         }
     }
 
@@ -339,6 +357,7 @@ struct DetailView: View {
             Divider()
             HStack {
                 Button("Save changes") { model.saveDraft() }
+                    .buttonStyle(.borderedProminent)
                     .disabled(!dirty || !errors.isEmpty)
                 if model.draftIsNew {
                     Button("Discard") { model.discardNew() }
@@ -392,20 +411,28 @@ struct DetailView: View {
     }
 
     private func folderRow(_ title: String, path: String, placeholder: String, choose: @escaping () -> Void) -> some View {
-        HStack {
-            Text(title).frame(width: 110, alignment: .leading)
-            if path.isEmpty {
-                Text(placeholder).foregroundStyle(.secondary).italic()
-            } else {
-                Text(shortPath(path))
-                    .font(.system(.body, design: .monospaced))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .textSelection(.enabled)
-                    .help(path)
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Image(systemName: title == "Source" ? "folder" : "externaldrive")
+                    .foregroundStyle(.secondary)
+                if path.isEmpty {
+                    Text(placeholder).foregroundStyle(.tertiary)
+                } else {
+                    Text(shortPath(path))
+                        .font(.system(.body, design: .monospaced))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                        .help(path)
+                }
+                Spacer(minLength: 8)
+                Button("Choose…", action: choose)
+                    .controlSize(.small)
             }
-            Spacer()
-            Button("Choose…", action: choose)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
     }
 
@@ -444,11 +471,51 @@ struct DetailView: View {
         }
     }
 
-    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.title3.weight(.semibold))
-            Divider()
+    private func section<Content: View>(_ title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(title, systemImage: icon)
+                .font(.headline)
+                .foregroundStyle(.primary)
             content()
+        }
+        .padding(16)
+        .macCard()
+    }
+}
+
+private struct MetricTile: View {
+    var title: String
+    var value: String
+    var detail: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(value)
+                .font(.title3.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            Text(detail)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private extension View {
+    func macCard() -> some View {
+        background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.07))
         }
     }
 }
@@ -606,8 +673,10 @@ struct ExcludesEditor: View {
     var body: some View {
         TextEditor(text: $text)
             .font(.system(.body, design: .monospaced))
-            .frame(minHeight: 72, maxHeight: 120)
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3)))
+            .scrollContentBackground(.hidden)
+            .padding(8)
+            .frame(minHeight: 88, maxHeight: 140)
+            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .onAppear { load() }
             .onChange(of: pairID) { _ in load() }
             .onChange(of: text) { newValue in
@@ -693,12 +762,13 @@ struct LogView: View {
             ScrollView {
                 Text(text.isEmpty ? "No activity yet." : text)
                     .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(text.isEmpty ? .secondary : .primary)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
             }
-            .frame(height: 220)
-            .background(Color(nsColor: .textBackgroundColor))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .frame(height: 200)
+            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .onAppear { text = readLogTail(pairID: pairID) }
         .onChange(of: pairID) { _ in text = readLogTail(pairID: pairID) }
