@@ -89,23 +89,16 @@ struct DetailView: View {
         } else if let running = model.running, running.job.pairID == draft.id {
             VStack(alignment: .leading, spacing: 6) {
                 if running.job.kind == .backup, let progress = running.progress {
-                    if progress.scanning {
-                        BackupProgressBar(fraction: nil)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 16)
-                        Text("Scanning files… \(progress.filesTotal.map { "\($0) found" } ?? "looking for changes")")
-                            .font(.callout)
-                    } else {
-                        BackupProgressBar(fraction: Double(progress.percent) / 100)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 16)
-                        Text("\(progress.percent)%  ·  \(formatBytes(progress.bytes)) copied  ·  \(progress.rate)  ·  \(progress.eta) left")
-                            .font(.callout)
-                        if let checked = progress.filesChecked, let total = progress.filesTotal {
-                            Text("\(checked) of \(total) files checked, \(progress.filesTransferred) copied")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+                    let elapsed = model.now.timeIntervalSince(running.started)
+                    BackupProgressBar(fraction: guessedProgress(elapsed: elapsed, eta: progress.eta))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 16)
+                    Text(backupProgressLine(progress))
+                        .font(.callout)
+                    if progress.filesTransferred > 0 {
+                        Text("\(progress.filesTransferred) files copied")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 } else {
                     HStack {
@@ -376,6 +369,13 @@ struct DetailView: View {
         }
         .padding(12)
         .background(.bar)
+    }
+
+    private func backupProgressLine(_ progress: TransferProgress) -> String {
+        var parts = ["\(formatBytes(progress.bytes)) copied"]
+        if progress.rate != "0.00kB/s" { parts.append(progress.rate) }
+        parts.append(aboutRemaining(progress.eta) ?? "estimating time")
+        return parts.joined(separator: "  ·  ")
     }
 
     private func nextText(_ kind: JobKind) -> String {

@@ -151,8 +151,8 @@ struct PairRow: View {
     private func pairStatus(_ pair: Pair) -> (String, Color, String) {
         if let running = model.running, running.job.pairID == pair.id {
             let text: String
-            if running.job.kind == .backup, let progress = running.progress, !progress.scanning {
-                text = "Backing up · \(progress.percent)%"
+            if running.job.kind == .backup, let progress = running.progress, let remaining = aboutRemaining(progress.eta) {
+                text = "Backing up · \(remaining.replacingOccurrences(of: " left", with: ""))"
             } else {
                 text = "\(running.job.kind.verb)…"
             }

@@ -98,6 +98,12 @@ final class MacSyncLogicTests: XCTestCase {
         XCTAssertEqual(scanning?.scanning, true)
         XCTAssertEqual(scanning?.filesTotal, 1031)
         XCTAssertNil(scanning?.filesChecked)
+        XCTAssertEqual(etaSeconds("0:02:10"), 130)
+        XCTAssertEqual(aboutRemaining("0:02:10"), "about 2 min left")
+        XCTAssertEqual(shortRemaining("0:00:45"), "45s")
+        XCTAssertNil(aboutRemaining("0:00:00"))
+        XCTAssertEqual(guessedProgress(elapsed: 60, eta: "0:02:00") ?? -1, 60.0 / 180.0, accuracy: 0.001)
+        XCTAssertNil(guessedProgress(elapsed: 10, eta: "0:00:00"))
         XCTAssertNil(parseProgress("sending incremental file list"))
         XCTAssertNil(parseProgress("Number of files: 1,031 (reg: 1,000, dir: 31)"))
     }

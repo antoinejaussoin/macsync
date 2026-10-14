@@ -71,7 +71,7 @@ SIGN_IDENTITY="Apple Development: you@example.com (TEAMID)" scripts/bundle.sh --
    ```
 
    `-aHAX` keeps permissions, times, symlinks, hard links, ACLs and extended attributes.
-4. While rsync is still walking the tree (`ir-chk` in its progress line) the percentage is not the size of the whole job, so the bar stays indeterminate and shows how many files have been found. Once the file list is complete (`to-chk`) the bar fills across its full width from the real byte total.
+4. Copying starts immediately. rsync keeps discovering files while it transfers, so the on-screen time left is its own estimate, not a measured total. Bytes copied, rate, and files transferred come from that same progress line. A full size measurement of the source and snapshots runs only after the queue is idle.
 5. On success (exit 0, or 24 when files vanished mid-copy) renames the folder to its stamp, points `latest` at it, applies retention, then locks the new snapshot's folders if read-only is on. On failure `latest` is not touched.
 
 Only one rsync runs at a time; other jobs wait in a queue.

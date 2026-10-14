@@ -139,10 +139,47 @@ struct TransferProgress: Equatable {
     var rate: String
     var eta: String
     var filesTransferred: UInt64
-    /// `ir-chk` means rsync is still discovering files, so `percent` is not the whole job.
+    /// True while rsync is still discovering files (`ir-chk`). Copying has already started.
+    /// The percentage is not the size of the whole job until this is false.
     var scanning: Bool
     var filesChecked: Int?
     var filesTotal: Int?
+}
+
+/// `H:MM:SS` as printed by `--info=progress2`. Hours may be larger than 23.
+func etaSeconds(_ eta: String) -> Int? {
+    let parts = eta.split(separator: ":").map(String.init)
+    guard parts.count == 3, let hours = Int(parts[0]), let minutes = Int(parts[1]), let seconds = Int(parts[2]),
+          hours >= 0, (0 ..< 60).contains(minutes), (0 ..< 60).contains(seconds)
+    else { return nil }
+    return hours * 3600 + minutes * 60 + seconds
+}
+
+/// Spoken guess of the time rsync printed. Nil when it has not estimated yet.
+func aboutRemaining(_ eta: String) -> String? {
+    guard let seconds = etaSeconds(eta), seconds > 0 else { return nil }
+    if seconds < 60 { return "about \(seconds) sec left" }
+    if seconds < 3600 {
+        return "about \(max(1, (seconds + 30) / 60)) min left"
+    }
+    let hours = seconds / 3600
+    let minutes = (seconds % 3600) / 60
+    if minutes == 0 { return "about \(hours) h left" }
+    return "about \(hours) h \(minutes) min left"
+}
+
+func shortRemaining(_ eta: String) -> String? {
+    guard let seconds = etaSeconds(eta), seconds > 0 else { return nil }
+    if seconds < 90 { return "\(seconds)s" }
+    if seconds < 3600 { return "\((seconds + 30) / 60)m" }
+    return "\(seconds / 3600)h"
+}
+
+/// Fill fraction from elapsed time and rsync's remaining-time guess. Nil until there is a guess.
+func guessedProgress(elapsed: TimeInterval, eta: String) -> Double? {
+    guard let remaining = etaSeconds(eta), remaining > 0 else { return nil }
+    let spent = max(0, elapsed)
+    return min(1, spent / (spent + Double(remaining)))
 }
 
 func parseProgress(_ line: String) -> TransferProgress? {

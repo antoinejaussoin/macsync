@@ -131,15 +131,15 @@ final class StatusMenu: NSObject {
             return (first, nil)
         }
         if let running = model.running {
-            let percent = running.progress?.percent
-            let scanning = running.progress?.scanning ?? true
             let text: String
-            if running.job.kind == .backup, let percent, running.progress?.scanning == false {
-                text = "Backing up \(running.pairName) (\(percent)%)"
+            let title: String?
+            if running.job.kind == .backup, let progress = running.progress, let remaining = aboutRemaining(progress.eta) {
+                text = "Backing up \(running.pairName) (\(remaining))"
+                title = shortRemaining(progress.eta)
             } else {
                 text = "\(running.job.kind.verb) \(running.pairName)…"
+                title = nil
             }
-            let title = (running.job.kind == .backup && !scanning) ? percent.map { "\($0)%" } : nil
             return (text, title)
         }
         if !model.queue.isEmpty {
