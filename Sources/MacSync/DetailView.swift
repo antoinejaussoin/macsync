@@ -233,8 +233,9 @@ struct DetailView: View {
                             .foregroundStyle(.secondary)
                     }
                     if !model.draftIsNew {
-                        Button("Refresh") { model.refreshStats() }
+                        Button("Measure disk usage") { model.refreshStats() }
                             .controlSize(.small)
+                            .help("Walks the source and the snapshots to add up their size. This is separate from a backup.")
                     }
                 }
             }

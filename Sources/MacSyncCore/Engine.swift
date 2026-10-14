@@ -124,8 +124,6 @@ final class Engine: @unchecked Sendable {
     private let cond = NSCondition()
     private var currentCancel = CancelHandle()
     private var onChange: (() -> Void)?
-    /// Size measurements waiting until no rsync is running, so `du` does not compete with a copy.
-    private var pendingMeasure: Set<String> = []
     private let tickInterval: TimeInterval
 
     init(config: Config, state: SyncState, notice: String?, tickInterval: TimeInterval = 15) {
@@ -232,11 +230,8 @@ final class Engine: @unchecked Sendable {
 
     func refreshStats(pairID: String) {
         let pair: Pair? = withLock {
+            guard shared.running == nil, shared.queue.isEmpty else { return nil }
             guard let pair = shared.config.pair(pairID) else { return nil }
-            if shared.running != nil || !shared.queue.isEmpty {
-                pendingMeasure.insert(pairID)
-                return nil
-            }
             if !shared.statsBusy.insert(pairID).inserted { return nil }
             return pair
         }
@@ -288,34 +283,14 @@ final class Engine: @unchecked Sendable {
             changed()
             let cancel = CancelHandle()
             withLock { currentCancel = cancel }
-            var measurePair: String?
             switch work.job.kind {
             case .backup:
-                if runBackupJob(pair: work.pair, rsync: work.rsync, cancel: cancel, started: work.started) {
-                    measurePair = work.pair.id
-                }
+                runBackupJob(pair: work.pair, rsync: work.rsync, cancel: cancel, started: work.started)
             case .integrity:
                 runIntegrityJob(pair: work.pair, rsync: work.rsync, cancel: cancel, started: work.started)
             }
-            withLock {
-                shared.running = nil
-                if let measurePair { pendingMeasure.insert(measurePair) }
-            }
+            withLock { shared.running = nil }
             changed()
-            flushPendingMeasure()
-        }
-    }
-
-    /// Disk usage walks the trees, so it waits until the copy queue is empty.
-    private func flushPendingMeasure() {
-        let ids: [String] = withLock {
-            guard shared.running == nil, shared.queue.isEmpty else { return [] }
-            let ids = pendingMeasure
-            pendingMeasure.removeAll()
-            return Array(ids)
-        }
-        for id in ids {
-            refreshStats(pairID: id)
         }
     }
 
@@ -333,7 +308,6 @@ final class Engine: @unchecked Sendable {
             if !shared.queue.isEmpty {
                 let job = shared.queue.removeFirst()
                 if let pair = shared.config.pair(job.pairID) {
-                    shared.rsync = locateRsync(overridePath: shared.config.rsyncPath)
                     let started = Date()
                     shared.running = Running(job: job, pairName: pair.displayName, started: started, progress: nil)
                     return Work(job: job, pair: pair, rsync: shared.rsync, started: started)
@@ -344,8 +318,7 @@ final class Engine: @unchecked Sendable {
         }
     }
 
-    @discardableResult
-    private func runBackupJob(pair: Pair, rsync: RsyncStatus, cancel: CancelHandle, started: Date) -> Bool {
+    private func runBackupJob(pair: Pair, rsync: RsyncStatus, cancel: CancelHandle, started: Date) {
         var lastUpdate = Date().addingTimeInterval(-5)
         let result: Result<BackupResult, BackupError>
         switch rsync {
@@ -411,8 +384,6 @@ final class Engine: @unchecked Sendable {
         if notifyFailure {
             postNotification(summary: "Backup failed: \(pair.displayName)", body: record.message)
         }
-        if case .success = result { return true }
-        return false
     }
 
     private func runIntegrityJob(pair: Pair, rsync: RsyncStatus, cancel: CancelHandle, started: Date) {

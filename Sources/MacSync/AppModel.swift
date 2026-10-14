@@ -184,7 +184,6 @@ final class AppModel: ObservableObject {
             try engine.replaceConfig(updated)
             draftIsNew = false
             showFlash("Saved \"\(draft.displayName)\"", error: false)
-            engine.refreshStats(pairID: draft.id)
             snapshotRefreshToken += 1
             pull()
         } catch {
@@ -267,6 +266,10 @@ final class AppModel: ObservableObject {
 
     func refreshStats() {
         guard let id = draft?.id, !draftIsNew else { return }
+        if running != nil || !queue.isEmpty {
+            showFlash("Disk usage is measured only while nothing is copying.", error: false)
+            return
+        }
         engine.refreshStats(pairID: id)
     }
 

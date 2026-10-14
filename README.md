@@ -71,7 +71,7 @@ SIGN_IDENTITY="Apple Development: you@example.com (TEAMID)" scripts/bundle.sh --
    ```
 
    `-aHAX` keeps permissions, times, symlinks, hard links, ACLs and extended attributes.
-4. Copying starts immediately. rsync keeps discovering files while it transfers, so the on-screen time left is its own estimate, not a measured total. Bytes copied, rate, and files transferred come from that same progress line. A full size measurement of the source and snapshots runs only after the queue is idle.
+4. Copying starts immediately. One rsync command does the backup. On a local disk that command forks into three processes (the client, and the two sides of its internal pipe); that is rsync itself, not three backups. The on-screen time left is rsync's own estimate. Bytes copied, rate, and files transferred come from that same progress line. Source and snapshot sizes are not measured unless you press Measure disk usage.
 5. On success (exit 0, or 24 when files vanished mid-copy) renames the folder to its stamp, points `latest` at it, applies retention, then locks the new snapshot's folders if read-only is on. On failure `latest` is not touched.
 
 Only one rsync runs at a time; other jobs wait in a queue.
