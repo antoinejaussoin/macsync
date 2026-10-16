@@ -1,11 +1,12 @@
 use chrono::Local;
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use crate::config::{Config, FolderPair};
 use crate::logutil::{append_line, PairLogger};
@@ -14,7 +15,8 @@ use crate::retention::{
     make_snapshot_read_only,
 };
 use crate::rsync::{
-    backup_arguments, display_arguments, parse_progress_line, rsync_exit_meaning, BackupArgParams,
+    backup_arguments, display_arguments, is_stats_line, parse_progress, rsync_exit_meaning,
+    summarize_stats, BackupArgParams, TransferProgress,
 };
 
 #[derive(Debug)]
@@ -85,6 +87,11 @@ pub fn run_backup(
     })?;
 
     let link_dest = latest_snapshot_path(&dest).map(|p| p.to_string_lossy().into_owned());
+    if let Some(ref prev) = link_dest {
+        log.info(&format!("link-dest: {prev}"));
+    } else {
+        log.info("link-dest: none (first snapshot or no latest)");
+    }
 
     let args = backup_arguments(&BackupArgParams {
         source: &pair.source,
@@ -107,7 +114,9 @@ pub fn run_backup(
         display_arguments(&args)
     ));
 
-    let status = run_rsync_streaming(&cfg.rsync_path, &args, log, cancel)?;
+    let started = Instant::now();
+    let (status, stats_summary) = run_rsync_streaming(&cfg.rsync_path, &args, log, cancel)?;
+    let elapsed = started.elapsed();
     if cancel.load(Ordering::SeqCst) {
         let _ = remove_inprogress(&inprogress);
         return Err(BackupError("backup cancelled".into()));
@@ -154,8 +163,22 @@ pub fn run_backup(
         Err(e) => log.warn(&format!("Retention failed: {e}")),
     }
 
-    log.info(&format!("Backup finished: {stamp}"));
+    log.info(&format!(
+        "Backup finished: {stamp} in {} — {stats_summary}",
+        format_duration(elapsed)
+    ));
     Ok(stamp)
+}
+
+fn format_duration(d: Duration) -> String {
+    let secs = d.as_secs();
+    if secs < 60 {
+        format!("{secs}s")
+    } else if secs < 3600 {
+        format!("{}m {}s", secs / 60, secs % 60)
+    } else {
+        format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
+    }
 }
 
 fn remove_inprogress(path: &Path) -> std::io::Result<()> {
@@ -165,12 +188,13 @@ fn remove_inprogress(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Read rsync stdout/stderr, splitting on both `\n` and `\r` so progress2 updates are seen.
 fn run_rsync_streaming(
     rsync_path: &str,
     args: &[String],
     log: &PairLogger,
     cancel: &Arc<AtomicBool>,
-) -> Result<i32, BackupError> {
+) -> Result<(i32, String), BackupError> {
     let mut child = Command::new(rsync_path)
         .args(args)
         .stdout(Stdio::piped())
@@ -180,39 +204,82 @@ fn run_rsync_streaming(
 
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
-    let log_path_out = log.path().to_path_buf();
-    let log_path_err = log.path().to_path_buf();
+    let log_path = log.path().to_path_buf();
+    let stats_lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let last_progress_log = Arc::new(Mutex::new(Instant::now() - Duration::from_secs(10)));
+    let last_progress: Arc<Mutex<Option<TransferProgress>>> = Arc::new(Mutex::new(None));
 
-    let out_handle = thread::spawn(move || {
-        if let Some(out) = stdout {
-            let reader = BufReader::new(out);
-            let mut last_progress = String::new();
-            for line in reader.lines().flatten() {
-                if let Some(progress) = parse_progress_line(&line) {
-                    if progress != last_progress {
-                        append_line(&log_path_out, &format!("progress: {progress}"));
-                        println!("progress: {progress}");
-                        last_progress = progress;
+    let make_reader = |
+        mut stream: Box<dyn Read + Send>,
+        log_path: PathBuf,
+        stats_lines: Arc<Mutex<Vec<String>>>,
+        last_progress_log: Arc<Mutex<Instant>>,
+        last_progress: Arc<Mutex<Option<TransferProgress>>>,
+    | {
+        thread::spawn(move || {
+            let mut buf = [0u8; 16 * 1024];
+            let mut pending: Vec<u8> = Vec::new();
+            loop {
+                let n = match stream.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => n,
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(_) => break,
+                };
+                for &byte in &buf[..n] {
+                    if byte == b'\n' || byte == b'\r' {
+                        if pending.is_empty() {
+                            continue;
+                        }
+                        let line = String::from_utf8_lossy(&pending).into_owned();
+                        pending.clear();
+                        handle_rsync_line(
+                            &line,
+                            &log_path,
+                            &stats_lines,
+                            &last_progress_log,
+                            &last_progress,
+                        );
+                    } else {
+                        pending.push(byte);
                     }
-                } else if !line.trim().is_empty() {
-                    append_line(&log_path_out, &line);
-                    println!("{line}");
                 }
             }
-        }
-    });
+            if !pending.is_empty() {
+                let line = String::from_utf8_lossy(&pending).into_owned();
+                handle_rsync_line(
+                    &line,
+                    &log_path,
+                    &stats_lines,
+                    &last_progress_log,
+                    &last_progress,
+                );
+            }
+        })
+    };
 
-    let err_handle = thread::spawn(move || {
-        if let Some(err) = stderr {
-            let reader = BufReader::new(err);
-            for line in reader.lines().flatten() {
-                if !line.trim().is_empty() {
-                    append_line(&log_path_err, &format!("rsync: {line}"));
-                    eprintln!("rsync: {line}");
-                }
-            }
-        }
-    });
+    let out_handle = if let Some(out) = stdout {
+        Some(make_reader(
+            Box::new(out),
+            log_path.clone(),
+            stats_lines.clone(),
+            last_progress_log.clone(),
+            last_progress.clone(),
+        ))
+    } else {
+        None
+    };
+    let err_handle = if let Some(err) = stderr {
+        Some(make_reader(
+            Box::new(err),
+            log_path.clone(),
+            stats_lines.clone(),
+            last_progress_log.clone(),
+            last_progress.clone(),
+        ))
+    } else {
+        None
+    };
 
     loop {
         if cancel.load(Ordering::SeqCst) {
@@ -221,7 +288,7 @@ fn run_rsync_streaming(
         }
         match child.try_wait() {
             Ok(Some(_)) => break,
-            Ok(None) => thread::sleep(std::time::Duration::from_millis(200)),
+            Ok(None) => thread::sleep(Duration::from_millis(200)),
             Err(e) => return Err(BackupError(format!("wait failed: {e}"))),
         }
     }
@@ -229,7 +296,80 @@ fn run_rsync_streaming(
     let status = child
         .wait()
         .map_err(|e| BackupError(format!("wait failed: {e}")))?;
-    let _ = out_handle.join();
-    let _ = err_handle.join();
-    Ok(status.code().unwrap_or(-1))
+    if let Some(h) = out_handle {
+        let _ = h.join();
+    }
+    if let Some(h) = err_handle {
+        let _ = h.join();
+    }
+
+    // Log final progress once more if we have it
+    if let Ok(guard) = last_progress.lock() {
+        if let Some(ref p) = *guard {
+            let line = p.summary_line();
+            append_line(&log_path, &line);
+            println!("{line}");
+            let _ = std::io::stdout().flush();
+        }
+    }
+
+    let stats = stats_lines.lock().unwrap().clone();
+    let summary = summarize_stats(&stats);
+    if summary != "Finished" || !stats.is_empty() {
+        for line in &stats {
+            // Already logged individually if they looked like normal lines; ensure summary is clear
+            let _ = line;
+        }
+        log.info(&format!("rsync stats: {summary}"));
+    }
+
+    Ok((status.code().unwrap_or(-1), summary))
+}
+
+fn handle_rsync_line(
+    line: &str,
+    log_path: &Path,
+    stats_lines: &Mutex<Vec<String>>,
+    last_progress_log: &Mutex<Instant>,
+    last_progress: &Mutex<Option<TransferProgress>>,
+) {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    if let Some(progress) = parse_progress(trimmed) {
+        if let Ok(mut g) = last_progress.lock() {
+            *g = Some(progress.clone());
+        }
+        // Throttle log noise: at most every 3s (progress2 updates many times/sec via \r).
+        let should_log = last_progress_log
+            .lock()
+            .map(|mut t| {
+                if t.elapsed() >= Duration::from_secs(3) {
+                    *t = Instant::now();
+                    true
+                } else {
+                    false
+                }
+            })
+            .unwrap_or(false);
+        if should_log {
+            let msg = progress.summary_line();
+            append_line(log_path, &msg);
+            println!("{msg}");
+            let _ = std::io::stdout().flush();
+        }
+        return;
+    }
+    if is_stats_line(trimmed) {
+        if let Ok(mut s) = stats_lines.lock() {
+            s.push(trimmed.to_string());
+        }
+        append_line(log_path, trimmed);
+        println!("{trimmed}");
+        return;
+    }
+    // Other rsync chatter (errors, warnings)
+    append_line(log_path, &format!("rsync: {trimmed}"));
+    eprintln!("rsync: {trimmed}");
 }

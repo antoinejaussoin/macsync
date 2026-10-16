@@ -228,17 +228,151 @@ pub fn rsync_exit_meaning(code: i32) -> &'static str {
     }
 }
 
-/// Parse a progress2 line for logging (bytes, rate, ETA).
-pub fn parse_progress_line(line: &str) -> Option<String> {
-    let line = line.trim();
-    if line.is_empty() {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransferProgress {
+    pub bytes: u64,
+    pub percent: i32,
+    pub rate: String,
+    pub eta: String,
+    pub files_transferred: u64,
+    /// True while rsync is still discovering files (`ir-chk`).
+    pub scanning: bool,
+}
+
+impl TransferProgress {
+    /// Human line for logs — no disk walk, only what rsync already printed.
+    pub fn summary_line(&self) -> String {
+        let size = format_bytes(self.bytes);
+        let files = if self.files_transferred > 0 {
+            format!(", {} file(s)", self.files_transferred)
+        } else {
+            String::new()
+        };
+        if self.scanning {
+            format!(
+                "progress: {size} transferred at {} ({}% of known so far, still scanning, ETA {}){files}",
+                self.rate, self.percent, self.eta
+            )
+        } else {
+            format!(
+                "progress: {size} at {} ({}%, ETA {}){files}",
+                self.rate, self.percent, self.eta
+            )
+        }
+    }
+}
+
+/// Parse a progress2 line (bytes, %, rate, ETA, xfr#).
+pub fn parse_progress(line: &str) -> Option<TransferProgress> {
+    let tokens: Vec<&str> = line.split_whitespace().collect();
+    if tokens.len() < 4 || !tokens[1].ends_with('%') {
         return None;
     }
-    // Typical: "  1,234,567  45%  12.34MB/s    0:01:23  (xfr#12, ir-chk=1000/2000)"
-    if !line.contains('%') && !line.contains("/s") {
-        return None;
+    let bytes_text = tokens[0].replace(',', "");
+    let bytes = bytes_text.parse().ok()?;
+    let percent = tokens[1].trim_end_matches('%').parse().ok()?;
+    let rate = tokens[2].to_string();
+    let eta = tokens[3].to_string();
+
+    let mut files_transferred = 0u64;
+    let mut scanning = true;
+    for token in &tokens {
+        if let Some(raw) = token
+            .strip_prefix("(xfr#")
+            .or_else(|| token.strip_prefix("xfr#"))
+        {
+            let number = raw.trim_end_matches([',', ')']);
+            files_transferred = number.parse().unwrap_or(0);
+        }
+        for prefix in ["ir-chk=", "to-chk="] {
+            if let Some(idx) = token.find(prefix) {
+                let rest = &token[idx + prefix.len()..];
+                let rest = rest.trim_end_matches(')');
+                let mut parts = rest.split('/');
+                let _remaining = parts.next()?;
+                let _total = parts.next()?;
+                scanning = prefix == "ir-chk=";
+            }
+        }
     }
-    Some(line.to_string())
+
+    Some(TransferProgress {
+        bytes,
+        percent,
+        rate,
+        eta,
+        files_transferred,
+        scanning,
+    })
+}
+
+pub fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 6] = ["B", "KB", "MB", "GB", "TB", "PB"];
+    let mut value = bytes as f64;
+    let mut unit = 0usize;
+    while value >= 1000.0 && unit < UNITS.len() - 1 {
+        value /= 1000.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+/// Summarize `--info=stats2` lines (no extra scanning).
+pub fn summarize_stats(lines: &[String]) -> String {
+    fn value(lines: &[String], prefix: &str) -> Option<u64> {
+        for line in lines {
+            let trimmed = line.trim();
+            if let Some(rest) = trimmed.strip_prefix(prefix) {
+                let token = rest.split_whitespace().next()?;
+                return token.replace(',', "").parse().ok();
+            }
+        }
+        None
+    }
+    let copied = value(lines, "Number of regular files transferred:");
+    let total = value(lines, "Number of files:");
+    let bytes = value(lines, "Total transferred file size:");
+    let literal = value(lines, "Literal data:");
+    let matched = value(lines, "Matched data:");
+    match (copied, total, bytes) {
+        (Some(copied), Some(total), Some(bytes)) => {
+            let mut s = format!(
+                "{} file(s) copied ({}) of {} listed",
+                copied,
+                format_bytes(bytes),
+                total
+            );
+            if let (Some(lit), Some(mat)) = (literal, matched) {
+                s.push_str(&format!(
+                    "; {} new, {} reused via link-dest/delta",
+                    format_bytes(lit),
+                    format_bytes(mat)
+                ));
+            }
+            s
+        }
+        (Some(copied), _, Some(bytes)) => {
+            format!("{} file(s) copied ({})", copied, format_bytes(bytes))
+        }
+        (Some(copied), _, _) => format!("{copied} file(s) copied"),
+        _ => "Finished".into(),
+    }
+}
+
+pub fn is_stats_line(line: &str) -> bool {
+    let t = line.trim();
+    t.starts_with("Number of ")
+        || t.starts_with("Total ")
+        || t.starts_with("Literal data:")
+        || t.starts_with("Matched data:")
+        || t.starts_with("File list ")
+        || t.starts_with("Total bytes ")
+        || t.starts_with("sent ")
+        || t.starts_with("total size is")
 }
 
 #[cfg(test)]
@@ -309,5 +443,35 @@ mod tests {
         assert_eq!(cmd, "ssh -o BatchMode=yes");
         assert!(!cmd.contains("-i"));
         assert!(!cmd.contains("-p"));
+    }
+
+    #[test]
+    fn parse_progress2_line() {
+        let p = parse_progress(
+            "  1,234,567  45%  12.34MB/s    0:01:23  (xfr#12, to-chk=100/200)",
+        )
+        .unwrap();
+        assert_eq!(p.bytes, 1_234_567);
+        assert_eq!(p.percent, 45);
+        assert_eq!(p.rate, "12.34MB/s");
+        assert_eq!(p.eta, "0:01:23");
+        assert_eq!(p.files_transferred, 12);
+        assert!(!p.scanning);
+        assert!(p.summary_line().contains("1.2 MB"));
+    }
+
+    #[test]
+    fn summarize_stats2() {
+        let lines = vec![
+            "Number of files: 100".into(),
+            "Number of regular files transferred: 3".into(),
+            "Total transferred file size: 4096".into(),
+            "Literal data: 1024".into(),
+            "Matched data: 3072".into(),
+        ];
+        let s = summarize_stats(&lines);
+        assert!(s.contains("3 file(s) copied"));
+        assert!(s.contains("4.1 KB"));
+        assert!(s.contains("reused"));
     }
 }
