@@ -14,8 +14,9 @@ DerivedData/
 # App bundle
 dist/
 
-# Rust build output from the previous version
+# Rust build output
 target/
+linux/target/
 
 # macOS
 .DS_Store

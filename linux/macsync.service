@@ -1,0 +1,16 @@
+[Unit]
+Description=MacSync rsync snapshot daemon
+Documentation=file://%h/.local/share/macsync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/macsync
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=10
+# Runs as the user who owns this user unit (no User= line).
+
+[Install]
+WantedBy=default.target

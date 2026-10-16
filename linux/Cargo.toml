@@ -1,0 +1,23 @@
+[package]
+name = "macsync"
+version = "0.1.0"
+edition = "2021"
+description = "Linux daemon that pulls dated, hard-linked rsync snapshots over SSH"
+license = "MIT"
+
+[[bin]]
+name = "macsync"
+path = "src/main.rs"
+
+[dependencies]
+chrono = { version = "0.4", features = ["serde", "clock"] }
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+strip = true

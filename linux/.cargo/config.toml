@@ -1,0 +1,7 @@
+# On Ubuntu amd64, the host linker is used and nothing here is required.
+#
+# From macOS, `make linux-amd64` sets
+#   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER
+# to scripts/zig-cc (needs `brew install zig`). You can also set that
+# env var yourself, or install cargo-zigbuild and run:
+#   cargo zigbuild --release --target x86_64-unknown-linux-gnu
