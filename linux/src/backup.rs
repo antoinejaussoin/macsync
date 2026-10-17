@@ -12,12 +12,19 @@ use crate::config::{Config, FolderPair};
 use crate::logutil::{append_line, PairLogger};
 use crate::retention::{
     apply_retention, ensure_relative_latest, format_stamp, latest_snapshot_path,
-    make_snapshot_read_only,
+    make_snapshot_read_only, parse_stamp,
 };
 use crate::rsync::{
     backup_arguments, display_arguments, is_stats_line, parse_progress, rsync_exit_meaning,
     summarize_stats, BackupArgParams, TransferProgress,
 };
+
+const INPROGRESS_PREFIX: &str = ".inprogress-";
+
+/// rsync exit codes that still yield a usable partial snapshot (missing/vanished files).
+fn rsync_exit_ok(code: i32) -> bool {
+    matches!(code, 0 | 23 | 24)
+}
 
 #[derive(Debug)]
 pub struct BackupError(pub String);
@@ -74,17 +81,7 @@ pub fn run_backup(
     }
 
     let stamp = format_stamp(Local::now());
-    let inprogress_name = format!(".inprogress-{stamp}");
-    let inprogress = dest.join(&inprogress_name);
-    if inprogress.exists() {
-        return Err(BackupError(format!(
-            "in-progress directory already exists: {}",
-            inprogress.display()
-        )));
-    }
-    fs::create_dir_all(&inprogress).map_err(|e| {
-        BackupError(format!("could not create {}: {e}", inprogress.display()))
-    })?;
+    let inprogress = prepare_inprogress(&dest, &stamp, log)?;
 
     let link_dest = latest_snapshot_path(&dest).map(|p| p.to_string_lossy().into_owned());
     if let Some(ref prev) = link_dest {
@@ -118,20 +115,31 @@ pub fn run_backup(
     let (status, stats_summary) = run_rsync_streaming(&cfg.rsync_path, &args, log, cancel)?;
     let elapsed = started.elapsed();
     if cancel.load(Ordering::SeqCst) {
-        let _ = remove_inprogress(&inprogress);
+        // Keep .inprogress so the next run can resume into it.
+        log.warn("backup cancelled; leaving incomplete snapshot for resume");
         return Err(BackupError("backup cancelled".into()));
     }
-    if status != 0 {
-        let _ = remove_inprogress(&inprogress);
+    if !rsync_exit_ok(status) {
+        // Keep .inprogress for resume on the next attempt.
+        log.error(&format!(
+            "rsync exited {status} ({}); incomplete snapshot kept at {}",
+            rsync_exit_meaning(status),
+            inprogress.display()
+        ));
         return Err(BackupError(format!(
             "rsync exited {status} ({})",
             rsync_exit_meaning(status)
         )));
     }
+    if status != 0 {
+        log.warn(&format!(
+            "rsync exited {status} ({}); finalizing snapshot anyway (files may reappear next run)",
+            rsync_exit_meaning(status)
+        ));
+    }
 
     let final_path = dest.join(&stamp);
     if final_path.exists() {
-        let _ = remove_inprogress(&inprogress);
         return Err(BackupError(format!(
             "snapshot already exists: {}",
             final_path.display()
@@ -170,6 +178,76 @@ pub fn run_backup(
     Ok(stamp)
 }
 
+/// Reuse the newest `.inprogress-*` if any (resume), else create a fresh one.
+/// Older incomplete dirs are removed so only one resume target remains.
+fn prepare_inprogress(
+    dest: &Path,
+    stamp: &str,
+    log: &PairLogger,
+) -> Result<PathBuf, BackupError> {
+    let target_name = format!("{INPROGRESS_PREFIX}{stamp}");
+    let target = dest.join(&target_name);
+
+    let mut pending: Vec<(String, Option<chrono::NaiveDateTime>)> = Vec::new();
+    if let Ok(entries) = fs::read_dir(dest) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !name.starts_with(INPROGRESS_PREFIX) {
+                continue;
+            }
+            let ft = match entry.file_type() {
+                Ok(ft) => ft,
+                Err(_) => continue,
+            };
+            if ft.is_symlink() || !ft.is_dir() {
+                continue;
+            }
+            let stamp_part = name[INPROGRESS_PREFIX.len()..].to_string();
+            let parsed = parse_stamp(&stamp_part);
+            pending.push((name, parsed));
+        }
+    }
+
+    // Newest stamp first; unparsable names sort last.
+    pending.sort_by(|a, b| match (&a.1, &b.1) {
+        (Some(ta), Some(tb)) => tb.cmp(ta),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => b.0.cmp(&a.0),
+    });
+
+    if let Some((reuse_name, _)) = pending.first() {
+        let reuse_path = dest.join(reuse_name);
+        if reuse_path != target {
+            log.info(&format!(
+                "Resuming incomplete snapshot {reuse_name} → {target_name}"
+            ));
+            fs::rename(&reuse_path, &target).map_err(|e| {
+                BackupError(format!(
+                    "could not rename {} → {}: {e}",
+                    reuse_path.display(),
+                    target.display()
+                ))
+            })?;
+        } else {
+            log.info(&format!("Resuming incomplete snapshot {target_name}"));
+        }
+        for (old_name, _) in pending.iter().skip(1) {
+            let old = dest.join(old_name);
+            log.info(&format!("Removing older incomplete snapshot {old_name}"));
+            if let Err(e) = fs::remove_dir_all(&old) {
+                log.warn(&format!("could not remove {}: {e}", old.display()));
+            }
+        }
+        return Ok(target);
+    }
+
+    fs::create_dir_all(&target).map_err(|e| {
+        BackupError(format!("could not create {}: {e}", target.display()))
+    })?;
+    Ok(target)
+}
+
 fn format_duration(d: Duration) -> String {
     let secs = d.as_secs();
     if secs < 60 {
@@ -179,13 +257,6 @@ fn format_duration(d: Duration) -> String {
     } else {
         format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
     }
-}
-
-fn remove_inprogress(path: &Path) -> std::io::Result<()> {
-    if path.exists() {
-        fs::remove_dir_all(path)?;
-    }
-    Ok(())
 }
 
 /// Read rsync stdout/stderr, splitting on both `\n` and `\r` so progress2 updates are seen.
