@@ -248,11 +248,14 @@ mod tests {
         let cfg = Config::load(f.path()).unwrap();
         assert_eq!(cfg.rsync_path, "/usr/bin/rsync");
         assert_eq!(cfg.ssh.port, 22);
-        assert_eq!(cfg.pair.len(), 1);
+        assert_eq!(cfg.pair.len(), 2);
         assert_eq!(cfg.pair[0].id, "photos");
         assert_eq!(cfg.pair[0].retention.keep_last, 30);
         assert_eq!(cfg.pair[0].retention.keep_yearly, KeepYearly::Forever);
         assert!(cfg.pair[0].read_only);
+        assert_eq!(cfg.pair[1].id, "docs");
+        assert_eq!(cfg.pair[1].integrity_schedule, "");
+        assert_eq!(cfg.pair[1].retention.keep_yearly, KeepYearly::Years(2));
     }
 
     #[test]

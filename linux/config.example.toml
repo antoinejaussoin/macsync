@@ -11,13 +11,16 @@ remote_rsync_path = "/opt/homebrew/bin/rsync"
 # identity_file = "~/.ssh/id_ed25519"
 extra_args = []
 
+# Each [[pair]] is one backup job. Add as many as you need; they run one at a time.
+# id must be unique (used for logs/ and state).
+
 [[pair]]
 id = "photos"
 name = "Photos"
 # Remote source: user@host:absolute/path — use the same host name as `ssh mini`
-source = "antoine@mini:/Volumes/Backup/sync"
+source = "antoine@mini:/Volumes/Backup/photos"
 # Local directory that holds dated snapshots (must already exist).
-destination = "/mnt/backup"
+destination = "/mnt/backup/photos"
 enabled = true
 # 5-field cron (minute hour day month weekday). Empty = manual / interactive only.
 backup_schedule = "0 2 * * *"
@@ -32,3 +35,22 @@ keep_weekly = 0
 keep_monthly = 3
 # "forever" or a number of years
 keep_yearly = "forever"
+
+[[pair]]
+id = "docs"
+name = "Documents"
+source = "antoine@mini:/Volumes/Backup/documents"
+destination = "/mnt/backup/docs"
+enabled = true
+backup_schedule = "30 3 * * *"
+# Empty = no scheduled integrity check (interactive backup still works).
+integrity_schedule = ""
+excludes = [".DS_Store", "*.tmp"]
+read_only = true
+
+[pair.retention]
+keep_last = 14
+keep_daily = 7
+keep_weekly = 4
+keep_monthly = 0
+keep_yearly = 2
