@@ -1,11 +1,11 @@
 [Unit]
 Description=MacSync rsync snapshot daemon
-Documentation=file://%h/.local/share/macsync
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
+# config.toml, state.toml, and logs/ live next to this binary
 ExecStart=%h/.local/bin/macsync
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure

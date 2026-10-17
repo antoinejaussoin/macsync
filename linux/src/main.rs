@@ -24,10 +24,10 @@ Usage:
 
 Any other argument prints this text on stderr and exits with status 2.
 
-Paths (override config with MACSYNC_CONFIG):
-  config  {config}
-  state   {state}
-  data    {data}
+Paths (same directory as the binary unless overridden):
+  config  {config}  (MACSYNC_CONFIG overrides)
+  state   {state}   (MACSYNC_HOME overrides the data dir)
+  logs    {data}/logs/
 
 Example config.toml:
 

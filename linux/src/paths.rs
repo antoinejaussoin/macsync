@@ -17,18 +17,28 @@ pub fn expand_tilde(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
+/// Directory containing this binary (resolved; falls back to `.`).
+pub fn executable_dir() -> PathBuf {
+    env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// Default: `config.toml` next to the executable. `MACSYNC_CONFIG` overrides.
 pub fn config_path() -> PathBuf {
     if let Some(path) = env::var_os("MACSYNC_CONFIG") {
         return PathBuf::from(path);
     }
-    home().join(".config/macsync/config.toml")
+    executable_dir().join("config.toml")
 }
 
+/// Data directory: next to the executable (or `MACSYNC_HOME` if set).
 pub fn data_dir() -> PathBuf {
     if let Some(path) = env::var_os("MACSYNC_HOME") {
         return PathBuf::from(path);
     }
-    home().join(".local/share/macsync")
+    executable_dir()
 }
 
 pub fn state_path() -> PathBuf {

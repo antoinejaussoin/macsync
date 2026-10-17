@@ -78,19 +78,24 @@ Only set `[ssh] identity_file` / `port` in `config.toml` when you need to **over
 
 ## Config
 
+`config.toml` lives **next to the binary** (same directory). `MACSYNC_CONFIG` overrides if set.
+
 ```bash
-mkdir -p ~/.config/macsync
-cp config.example.toml ~/.config/macsync/config.toml
-$EDITOR ~/.config/macsync/config.toml
+# If the binary is ~/macsync:
+cp config.example.toml ~/config.toml
+$EDITOR ~/config.toml
+
+# If the binary is ~/.local/bin/macsync:
+cp config.example.toml ~/.local/bin/config.toml
 ```
 
-Defaults:
+Defaults (all next to the binary; `MACSYNC_CONFIG` / `MACSYNC_HOME` override):
 
 | Path | Purpose |
 |------|---------|
-| `~/.config/macsync/config.toml` | Config (`MACSYNC_CONFIG` overrides) |
-| `~/.local/share/macsync/state.toml` | Last run / scheduler anchor |
-| `~/.local/share/macsync/logs/<id>.log` | Per-pair logs |
+| `<dir-of-macsync>/config.toml` | Config |
+| `<dir-of-macsync>/state.toml` | Last run / scheduler anchor |
+| `<dir-of-macsync>/logs/<id>.log` | Per-pair logs |
 
 Each `[[pair]]` needs:
 
@@ -105,22 +110,17 @@ Empty `backup_schedule` / `integrity_schedule` means that job is off (interactiv
 
 ## Enable linger and the user service
 
-User services stop at logout unless lingering is on. Enable linger so backups continue after logout and start at boot:
+`make deploy-linux` copies `macsync`, a `Makefile`, and `config.example.toml` into `/home/antoine/macsync/` (override with `LINUX_REMOTE_DIR`). On the Linux box:
 
 ```bash
-loginctl enable-linger "$USER"
+cd ~/macsync
+cp -n config.example.toml config.toml   # once, then edit
+make install-service                    # linger + systemd --user unit + enable --now
+make uninstall-service
+make status
 ```
 
-Install the unit:
-
-```bash
-mkdir -p ~/.config/systemd/user
-cp macsync.service ~/.config/systemd/user/macsync.service
-systemctl --user daemon-reload
-systemctl --user enable --now macsync
-```
-
-The unit is `Type=simple`, `ExecStart=%h/.local/bin/macsync`, `Restart=on-failure`. There is no `User=` line — a user unit already runs as you.
+`install-service` points `ExecStart` at the `macsync` next to that Makefile (config/state/logs stay in the same directory).
 
 ## Operate
 
@@ -131,7 +131,7 @@ systemctl --user reload macsync    # SIGHUP — reread config
 systemctl --user stop macsync      # stops the daemon (and the current rsync)
 ```
 
-Per-pair detail: `~/.local/share/macsync/logs/<id>.log`.
+Per-pair detail: `logs/<id>.log` next to the binary.
 
 One-off backup (does **not** change the unit):
 
