@@ -3,6 +3,7 @@ mod config;
 mod engine;
 mod integrity;
 mod logutil;
+mod notify;
 mod paths;
 mod retention;
 mod rsync;
@@ -21,6 +22,7 @@ Usage:
   macsync                 Run in the foreground (systemd Type=simple)
   macsync --help          Print this help and a config example
   macsync --interactive   One-shot: pick a pair and back it up now
+  macsync --test-notify   Send a test ntfy.sh notification and exit
 
 Any other argument prints this text on stderr and exits with status 2.
 
@@ -59,6 +61,16 @@ fn main() {
                 std::process::exit(2);
             }
             if let Err(e) = engine::run_interactive() {
+                eprintln!("macsync: {e}");
+                std::process::exit(1);
+            }
+        }
+        Some("--test-notify") => {
+            if args.next().is_some() {
+                eprint!("{}", usage());
+                std::process::exit(2);
+            }
+            if let Err(e) = engine::run_test_notify() {
                 eprintln!("macsync: {e}");
                 std::process::exit(1);
             }

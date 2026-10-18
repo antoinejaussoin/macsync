@@ -4,6 +4,12 @@
 #   brew install rsync
 remote_rsync_path = "/opt/homebrew/bin/rsync"
 
+# Push alerts via https://ntfy.sh (phone app). Empty topic = off.
+[notify]
+# topic = "https://ntfy.sh/your-secret-topic"
+# token = ""
+mount_remind_hours = 6
+
 [ssh]
 # Leave identity_file unset (or "") so Host entries in ~/.ssh/config apply
 # (HostName, Port, IdentityFile, known_hosts). Only set these to override:

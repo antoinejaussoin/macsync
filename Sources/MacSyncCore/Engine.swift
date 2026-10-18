@@ -267,7 +267,15 @@ final class Engine: @unchecked Sendable {
     private func tickerLoop() {
         while true {
             let didChange = withLock { shared.tick(now: Date()) }
-            if didChange {
+            let mountAlerts = withLock { collectMountAlerts() }
+            for alert in mountAlerts {
+                postNotification(
+                    summary: "Destination unavailable: \(alert.name)",
+                    body: alert.message,
+                    tags: "warning,cd"
+                )
+            }
+            if didChange || !mountAlerts.isEmpty {
                 cond.lock()
                 cond.signal()
                 cond.unlock()
@@ -275,6 +283,42 @@ final class Engine: @unchecked Sendable {
             }
             Thread.sleep(forTimeInterval: tickInterval)
         }
+    }
+
+    private struct MountAlert {
+        var name: String
+        var message: String
+    }
+
+    /// Caller must hold `cond`. Marks `lastMountAlert` when an alert should fire.
+    private func collectMountAlerts() -> [MountAlert] {
+        var alerts: [MountAlert] = []
+        let remind = shared.config.notify.mountRemindHours
+        let now = Date()
+        for pair in shared.config.pairs where pair.enabled {
+            var isDir: ObjCBool = false
+            let available = FileManager.default.fileExists(atPath: pair.destination, isDirectory: &isDir)
+                && isDir.boolValue
+            var record = shared.state.pairs[pair.id] ?? .empty
+            if available {
+                if record.lastMountAlert != nil {
+                    record.lastMountAlert = nil
+                    shared.state.pairs[pair.id] = record
+                    try? shared.state.save()
+                }
+                continue
+            }
+            if shouldMountAlert(last: record.lastMountAlert, remindHours: remind, now: now) {
+                record.lastMountAlert = now
+                shared.state.pairs[pair.id] = record
+                try? shared.state.save()
+                alerts.append(MountAlert(
+                    name: pair.displayName,
+                    message: "\(pair.destination) is missing or unmounted"
+                ))
+            }
+        }
+        return alerts
     }
 
     private func workerLoop() {
@@ -382,7 +426,11 @@ final class Engine: @unchecked Sendable {
             try? shared.state.save()
         }
         if notifyFailure {
-            postNotification(summary: "Backup failed: \(pair.displayName)", body: record.message)
+            postNotification(
+                summary: "Backup failed: \(pair.displayName)",
+                body: record.message,
+                tags: "x,warning"
+            )
         }
     }
 
@@ -408,7 +456,11 @@ final class Engine: @unchecked Sendable {
         record.started = started
         record.finished = Date()
         if record.outcome == .failed, !cancel.isCancelled {
-            postNotification(summary: "Integrity check: \(pair.displayName)", body: record.message)
+            postNotification(
+                summary: "Integrity check: \(pair.displayName)",
+                body: record.message,
+                tags: "warning"
+            )
         }
         withLock {
             var recordState = shared.state.pairs[pair.id] ?? .empty
@@ -438,10 +490,18 @@ private extension Result {
     }
 }
 
-private func postNotification(summary: String, body: String) {
-    let content = UNMutableNotificationContent()
-    content.title = summary
-    content.body = body
-    let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
-    UNUserNotificationCenter.current().add(request) { _ in }
+extension Engine {
+    fileprivate func postNotification(summary: String, body: String, tags: String = "warning") {
+        let content = UNMutableNotificationContent()
+        content.title = summary
+        content.body = body
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request) { _ in }
+        let notify = withLock { shared.config.notify }
+        if notify.enabled {
+            if let error = postNtfy(notify: notify, title: summary, body: body, tags: tags) {
+                fputs("macsync: ntfy failed: \(error)\n", stderr)
+            }
+        }
+    }
 }

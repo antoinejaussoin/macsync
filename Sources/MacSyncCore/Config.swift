@@ -2,12 +2,25 @@ import Foundation
 
 struct Config: Equatable {
     var rsyncPath: String?
+    var notify: NotifyConfig
     var pairs: [Pair]
 
-    static let empty = Config(rsyncPath: nil, pairs: [])
+    static let empty = Config(rsyncPath: nil, notify: .default, pairs: [])
 
     func pair(_ id: String) -> Pair? {
         pairs.first { $0.id == id }
+    }
+}
+
+struct NotifyConfig: Equatable {
+    var topic: String
+    var token: String
+    var mountRemindHours: Int
+
+    static let `default` = NotifyConfig(topic: "", token: "", mountRemindHours: 6)
+
+    var enabled: Bool {
+        !topic.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }
 
@@ -138,9 +151,14 @@ struct AppError: LocalizedError, Equatable {
 
 extension Config {
     init(parsing table: TOMLTable) throws {
-        try table.rejectUnknown(in: ["rsync_path", "pair"])
+        try table.rejectUnknown(in: ["rsync_path", "notify", "pair"])
         rsyncPath = try table.optionalString("rsync_path")
         if rsyncPath?.isEmpty == true { rsyncPath = nil }
+        if let notifyTable = try table.optionalTable("notify") {
+            notify = try NotifyConfig(parsing: notifyTable)
+        } else {
+            notify = .default
+        }
         if table.values["pair"] == nil {
             pairs = []
             return
@@ -160,6 +178,8 @@ extension Config {
             lines.append("rsync_path = \(tomlString(rsyncPath))")
             lines.append("")
         }
+        lines.append(contentsOf: notify.tomlLines())
+        lines.append("")
         if pairs.isEmpty {
             lines.append("pair = []")
             lines.append("")
@@ -171,6 +191,25 @@ extension Config {
             lines.append("")
         }
         return lines.joined(separator: "\n")
+    }
+}
+
+extension NotifyConfig {
+    init(parsing table: TOMLTable) throws {
+        try table.rejectUnknown(in: ["topic", "token", "mount_remind_hours"])
+        topic = try table.optionalString("topic") ?? ""
+        token = try table.optionalString("token") ?? ""
+        mountRemindHours = try table.optionalInt("mount_remind_hours") ?? 6
+        if mountRemindHours < 1 { mountRemindHours = 1 }
+    }
+
+    func tomlLines() -> [String] {
+        [
+            "[notify]",
+            "topic = \(tomlString(topic))",
+            "token = \(tomlString(token))",
+            "mount_remind_hours = \(mountRemindHours)",
+        ]
     }
 }
 

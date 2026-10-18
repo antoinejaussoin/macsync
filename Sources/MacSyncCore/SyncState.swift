@@ -25,8 +25,11 @@ struct PairState: Equatable {
     var lastSuccess: Date?
     var lastIntegrity: IntegrityRecord?
     var stats: Stats?
+    var lastMountAlert: Date?
 
-    static let empty = PairState(lastBackup: nil, lastSuccess: nil, lastIntegrity: nil, stats: nil)
+    static let empty = PairState(
+        lastBackup: nil, lastSuccess: nil, lastIntegrity: nil, stats: nil, lastMountAlert: nil
+    )
 }
 
 enum Outcome: String, Equatable {
@@ -107,7 +110,9 @@ extension SyncState {
 
 extension PairState {
     init(parsing table: TOMLTable) throws {
-        try table.rejectUnknown(in: ["last_backup", "last_success", "last_integrity", "stats"])
+        try table.rejectUnknown(in: [
+            "last_backup", "last_success", "last_integrity", "stats", "last_mount_alert",
+        ])
         if let backup = try table.optionalTable("last_backup") {
             lastBackup = try RunRecord(parsing: backup)
         }
@@ -118,12 +123,16 @@ extension PairState {
         if let statsTable = try table.optionalTable("stats") {
             stats = try Stats(parsing: statsTable)
         }
+        lastMountAlert = try table.optionalDate("last_mount_alert")
     }
 
     func tomlLines(id: String) -> [String] {
         var lines: [String] = ["[pairs.\(tomlKey(id))]"]
         if let lastSuccess {
             lines.append("last_success = \(tomlString(formatRFC3339(lastSuccess)))")
+        }
+        if let lastMountAlert {
+            lines.append("last_mount_alert = \(tomlString(formatRFC3339(lastMountAlert)))")
         }
         if lastBackup == nil, lastIntegrity == nil, stats == nil {
             lines.append("")

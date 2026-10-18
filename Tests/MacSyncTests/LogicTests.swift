@@ -419,7 +419,7 @@ final class MacSyncLogicTests: XCTestCase {
         pair.destination = root.path
         pair.backupSchedule = "0 2 * * *"
         pair.integritySchedule = "0 3 * * 0"
-        var data = SchedulerData(config: Config(rsyncPath: nil, pairs: [pair]), state: .empty, rsync: .missing("not needed"))
+        var data = SchedulerData(config: Config(rsyncPath: nil, notify: .default, pairs: [pair]), state: .empty, rsync: .missing("not needed"))
         XCTAssertFalse(data.tick(now: localDate(2026, 10, 11, 8, 0)))
         XCTAssertTrue(data.queue.isEmpty)
         XCTAssertEqual(data.nextRun(pair: data.config.pairs[0], kind: .backup, now: localDate(2026, 10, 11, 8, 0)), localDate(2026, 10, 12, 2, 0))
@@ -442,7 +442,7 @@ final class MacSyncLogicTests: XCTestCase {
         var pair = Pair.makeNew()
         pair.id = "p"
         pair.destination = root.path
-        var data = SchedulerData(config: Config(rsyncPath: nil, pairs: [pair]), state: .empty, rsync: .missing("not needed"))
+        var data = SchedulerData(config: Config(rsyncPath: nil, notify: .default, pairs: [pair]), state: .empty, rsync: .missing("not needed"))
         data.state.pairs["p"] = PairState(
             lastBackup: RunRecord(
                 started: localDate(2026, 10, 8, 2, 0),
@@ -471,7 +471,7 @@ final class MacSyncLogicTests: XCTestCase {
         disabled.id = "d"
         disabled.destination = root.path
         disabled.enabled = false
-        var data = SchedulerData(config: Config(rsyncPath: nil, pairs: [manual, disabled]), state: .empty, rsync: .missing("not needed"))
+        var data = SchedulerData(config: Config(rsyncPath: nil, notify: .default, pairs: [manual, disabled]), state: .empty, rsync: .missing("not needed"))
         _ = data.tick(now: localDate(2026, 10, 1, 0, 0))
         XCTAssertFalse(data.tick(now: localDate(2026, 10, 20, 0, 0)))
         XCTAssertTrue(data.queue.isEmpty)

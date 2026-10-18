@@ -126,6 +126,18 @@ offers presets (hourly, daily, weekly) and a custom field. If the Mac was asleep
 or the destination drive was unplugged at the scheduled time, the job runs once
 as soon as possible. Empty means manual only.
 
+### Notifications (ntfy.sh)
+
+Optional push alerts via [ntfy.sh](https://ntfy.sh) (same `[notify]` block as the Linux daemon). In `~/.config/macsync/config.toml`:
+
+```toml
+[notify]
+topic = "https://ntfy.sh/your-secret-topic"
+mount_remind_hours = 6
+```
+
+Or set the topic under **Notifications (ntfy)** in the sidebar and press **Test notification**. Local Notification Center alerts still fire; ntfy is added when a topic is set. Alerts cover backup failures and missing destinations (unplugged drives).
+
 ### Launch at login
 
 The "Launch at login" switch writes `~/Library/LaunchAgents/com.macsync.agent.plist`,

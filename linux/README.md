@@ -12,9 +12,11 @@ On this machine:
 
 ```bash
 sudo apt update
-sudo apt install -y rsync openssh-client
+sudo apt install -y rsync openssh-client curl
 rsync --version   # confirm 3.1+
 ```
+
+`curl` is used for optional [ntfy.sh](https://ntfy.sh) push notifications.
 
 On each remote host: **GNU rsync 3.1+** (not Apple’s openrsync) and an SSH login that can **read** the source folders. On a Mac remote:
 
@@ -143,6 +145,26 @@ Help and a full config example:
 
 ```bash
 macsync --help
+```
+
+## Notifications (ntfy.sh)
+
+Install the [ntfy](https://ntfy.sh) app on your phone, subscribe to a hard-to-guess topic, then in `config.toml` next to the binary:
+
+```toml
+[notify]
+topic = "https://ntfy.sh/your-secret-topic"
+# token = ""   # if the topic is protected
+mount_remind_hours = 6
+```
+
+You get a push when a backup fails hard, or when a destination directory is missing (e.g. the volume under it was unmounted; reminders at most every `mount_remind_hours`).
+
+Test without waiting for a failure:
+
+```bash
+macsync --test-notify
+systemctl --user reload macsync   # after editing config
 ```
 
 ## Notes

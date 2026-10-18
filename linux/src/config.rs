@@ -15,7 +15,41 @@ pub struct Config {
     #[serde(default)]
     pub ssh: SshConfig,
     #[serde(default)]
+    pub notify: NotifyConfig,
+    #[serde(default)]
     pub pair: Vec<FolderPair>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NotifyConfig {
+    /// Full URL or bare topic name (base https://ntfy.sh/). Empty = off.
+    #[serde(default)]
+    pub topic: String,
+    #[serde(default)]
+    pub token: String,
+    /// Resend mount alerts at most once per this many hours while still bad.
+    #[serde(default = "default_mount_remind_hours")]
+    pub mount_remind_hours: u32,
+}
+
+fn default_mount_remind_hours() -> u32 {
+    6
+}
+
+impl Default for NotifyConfig {
+    fn default() -> Self {
+        Self {
+            topic: String::new(),
+            token: String::new(),
+            mount_remind_hours: default_mount_remind_hours(),
+        }
+    }
+}
+
+impl NotifyConfig {
+    pub fn enabled(&self) -> bool {
+        !self.topic.trim().is_empty()
+    }
 }
 
 fn default_rsync_path() -> String {

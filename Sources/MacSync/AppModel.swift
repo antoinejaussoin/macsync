@@ -25,6 +25,9 @@ final class AppModel: ObservableObject {
     @Published var flash: Flash?
     @Published var customSchedule: Set<String> = []
     @Published var rsyncOverride = ""
+    @Published var notifyTopic = ""
+    @Published var notifyToken = ""
+    @Published var notifyStatus: String?
     @Published var loginEnabled = false
     @Published var snapshotRefreshToken = 0
 
@@ -52,6 +55,8 @@ final class AppModel: ObservableObject {
         rsync = locateRsync(overridePath: loaded.rsyncPath)
         self.notice = notice
         rsyncOverride = loaded.rsyncPath ?? ""
+        notifyTopic = loaded.notify.topic
+        notifyToken = loaded.notify.token
         loginEnabled = loginItemEnabled()
         selectedID = loaded.pairs.first?.id
         draft = loaded.pairs.first
@@ -84,7 +89,11 @@ final class AppModel: ObservableObject {
             return
         }
         let snap = engine.snapshot()
-        if config != snap.config { config = snap.config }
+        if config != snap.config {
+            config = snap.config
+            notifyTopic = snap.config.notify.topic
+            notifyToken = snap.config.notify.token
+        }
         if state != snap.state { state = snap.state }
         if running != snap.running { running = snap.running }
         if queue != snap.queue { queue = snap.queue }
@@ -229,6 +238,36 @@ final class AppModel: ObservableObject {
             pull()
         } catch {
             showFlash(error.localizedDescription, error: true)
+        }
+    }
+
+    func applyNotifySettings() {
+        var updated = config
+        updated.notify.topic = notifyTopic.trimmingCharacters(in: .whitespacesAndNewlines)
+        updated.notify.token = notifyToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            try engine.replaceConfig(updated)
+            pull()
+            notifyStatus = updated.notify.enabled ? "Saved" : "Saved (ntfy off — empty topic)"
+        } catch {
+            showFlash(error.localizedDescription, error: true)
+        }
+    }
+
+    func testNotification() {
+        applyNotifySettings()
+        let notify = config.notify
+        guard notify.enabled else {
+            notifyStatus = "Set a topic first"
+            return
+        }
+        let message = ntfyTestMessage()
+        if let error = postNtfy(notify: notify, title: message.title, body: message.body, tags: "white_check_mark") {
+            notifyStatus = "Failed: \(error)"
+            showFlash("ntfy: \(error)", error: true)
+        } else {
+            notifyStatus = "Test notification sent"
+            showFlash("Test notification sent", error: false)
         }
     }
 

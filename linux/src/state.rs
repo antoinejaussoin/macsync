@@ -21,6 +21,8 @@ pub struct PairState {
     pub last_integrity: Option<String>,
     pub last_backup_ok: Option<bool>,
     pub last_integrity_ok: Option<bool>,
+    /// Last time we sent a mount/destination alert (ISO local naive).
+    pub last_mount_alert: Option<String>,
 }
 
 impl AppState {

@@ -117,6 +117,22 @@ struct ContentView: View {
                 Button("Apply") { model.applyRsyncOverride() }
             }
             .font(.caption)
+            DisclosureGroup("Notifications (ntfy)") {
+                TextField("Topic URL or name", text: $model.notifyTopic)
+                    .textFieldStyle(.roundedBorder)
+                TextField("Token (optional)", text: $model.notifyToken)
+                    .textFieldStyle(.roundedBorder)
+                HStack {
+                    Button("Apply") { model.applyNotifySettings() }
+                    Button("Test notification") { model.testNotification() }
+                }
+                if let status = model.notifyStatus {
+                    Text(status)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .font(.caption)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)

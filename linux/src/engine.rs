@@ -5,10 +5,15 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::Duration;
 
+use std::path::Path;
+
 use crate::backup::run_backup;
 use crate::config::Config;
 use crate::integrity::{run_integrity, IntegrityOutcome};
 use crate::logutil::{ensure_data_dirs, PairLogger};
+use crate::notify::{
+    clear_mount_alert, destination_ok, mark_mount_alert, publish, should_mount_alert,
+};
 use crate::paths::{config_path, log_file, state_path};
 use crate::rsync::check_rsync;
 use crate::schedule::{now_local, truncate_minute, CronExpr, ScheduleTracker};
@@ -115,19 +120,32 @@ fn run_job(
     };
 
     match kind {
-        JobKind::Backup => match run_backup(cfg, &pair, &log, cancel) {
-            Ok(_) => {
-                let mut st = state.lock().unwrap();
-                st.mark_backup(pair_id, true);
-                let _ = st.save(state_file);
-            }
-            Err(e) => {
-                log.error(&e.0);
+        JobKind::Backup => {
+            if let Err(msg) = destination_ok(Path::new(&pair.destination)) {
+                log.error(&msg);
+                maybe_notify_mount(cfg, state, state_file, &pair.id, &pair.name, &msg);
                 let mut st = state.lock().unwrap();
                 st.mark_backup(pair_id, false);
                 let _ = st.save(state_file);
+                return;
             }
-        },
+            match run_backup(cfg, &pair, &log, cancel) {
+                Ok(_) => {
+                    let mut st = state.lock().unwrap();
+                    clear_mount_alert(&mut st, pair_id);
+                    st.mark_backup(pair_id, true);
+                    let _ = st.save(state_file);
+                }
+                Err(e) => {
+                    log.error(&e.0);
+                    let mut st = state.lock().unwrap();
+                    st.mark_backup(pair_id, false);
+                    let _ = st.save(state_file);
+                    drop(st);
+                    notify_backup_failed(cfg, &pair.name, &e.0);
+                }
+            }
+        }
         JobKind::Integrity => match run_integrity(cfg, &pair, &log, cancel) {
             Ok(r) => {
                 let ok = r.outcome != IntegrityOutcome::Failed;
@@ -142,6 +160,65 @@ fn run_job(
                 let _ = st.save(state_file);
             }
         },
+    }
+}
+
+fn notify_backup_failed(cfg: &Config, pair_name: &str, error: &str) {
+    if !cfg.notify.enabled() {
+        return;
+    }
+    let title = format!("Backup failed: {pair_name}");
+    if let Err(e) = publish(&cfg.notify, &title, error, "x,warning") {
+        eprintln!("macsync: notify failed: {e}");
+    }
+}
+
+fn maybe_notify_mount(
+    cfg: &Config,
+    state: &Mutex<AppState>,
+    state_file: &Path,
+    pair_id: &str,
+    pair_name: &str,
+    message: &str,
+) {
+    if !cfg.notify.enabled() {
+        return;
+    }
+    let mut st = state.lock().unwrap();
+    let pair_state = st.pairs.get(pair_id).cloned().unwrap_or_default();
+    if !should_mount_alert(&pair_state, cfg.notify.mount_remind_hours) {
+        return;
+    }
+    let title = format!("Destination unavailable: {pair_name}");
+    match publish(&cfg.notify, &title, message, "warning,cd") {
+        Ok(()) => {
+            mark_mount_alert(&mut st, pair_id);
+            let _ = st.save(state_file);
+        }
+        Err(e) => eprintln!("macsync: notify failed: {e}"),
+    }
+}
+
+fn check_destinations(cfg: &Config, state: &Mutex<AppState>, state_file: &Path) {
+    if !cfg.notify.enabled() {
+        return;
+    }
+    for pair in &cfg.pair {
+        if !pair.enabled {
+            continue;
+        }
+        match destination_ok(Path::new(&pair.destination)) {
+            Ok(()) => {
+                let mut st = state.lock().unwrap();
+                if st.pairs.get(&pair.id).and_then(|p| p.last_mount_alert.as_ref()).is_some() {
+                    clear_mount_alert(&mut st, &pair.id);
+                    let _ = st.save(state_file);
+                }
+            }
+            Err(msg) => {
+                maybe_notify_mount(cfg, state, state_file, &pair.id, &pair.name, &msg);
+            }
+        }
     }
 }
 
@@ -203,6 +280,11 @@ pub fn run_daemon() -> Result<(), String> {
             let mut st = state.lock().unwrap();
             st.set_scheduler_tick(now);
             let _ = st.save(&state_file);
+        }
+
+        {
+            let cfg_snap = cfg_lock.read().unwrap().clone();
+            check_destinations(&cfg_snap, &state, &state_file);
         }
 
         for (pair_id, kind) in due {
@@ -315,8 +397,21 @@ pub fn run_interactive() -> Result<(), String> {
                 let mut st = AppState::load(&state_path());
                 st.mark_backup(&pair.id, false);
                 let _ = st.save(&state_path());
+                notify_backup_failed(&cfg, &pair.name, &e.0);
                 return Err(e.0);
             }
         }
     }
+}
+
+pub fn run_test_notify() -> Result<(), String> {
+    let cfg = Config::load(&config_path()).map_err(|e| e.0)?;
+    if !cfg.notify.enabled() {
+        return Err("notify.topic is empty in config".into());
+    }
+    let (title, body) = crate::notify::test_message();
+    publish(&cfg.notify, &title, &body, "white_check_mark")
+        .map_err(|e| e)?;
+    println!("Sent test notification to {}", cfg.notify.topic.trim());
+    Ok(())
 }
